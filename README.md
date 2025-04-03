@@ -1,4 +1,4 @@
-<a href="https://githubsfdeploy.herokuapp.com?owner=mattandneil&amp;repo=statecodes&amp;ref=master">
+<a href="https://githubsfdeploy.herokuapp.com?owner=rmodis1&amp;repo=stateCodes&amp;ref=master">
 <img align="right" alt="Deploy to Salesforce" src="https://raw.githubusercontent.com/mattandneil/statecodes/master/README1.png" width="150" />
 </a> This tool initializes all ISO states by screen scraping the forms in setup.<br />(State and Country picklist values cannot be created any other way)
 
