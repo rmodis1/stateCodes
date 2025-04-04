@@ -7,9 +7,9 @@
  * https://salesforce.stackexchange.com/questions/20755/how-to-mass-populate-state-country-picklist-values
  * https://salesforce.stackexchange.com/questions/78377/how-to-write-address-settings-in-order-to-implement-country-picklists-via-metada
  */
-public class StateCodes implements Database.Batchable<StateCodes.StateData>, Database.AllowsCallouts, HttpCalloutMock
+public inherited sharing class StateCodes implements Database.Batchable<StateCodes.StateData>, Database.AllowsCallouts, HttpCalloutMock
 {
-    public String stateCodes {get; set;}
+    public List<StateData> stateCodes {get; set;}
     ApexPages.StandardController controller;
     private List<StateData> stateDataList;
 
@@ -28,7 +28,8 @@ public class StateCodes implements Database.Batchable<StateCodes.StateData>, Dat
     public StateCodes(ApexPages.StandardController controller)
     {
         this.controller = controller;
-        this.stateCodes = Json.serializePretty(getStateDataList());
+        this.stateCodes = getStateDataList();
+        this.stateDataList = getStateDataList();
     }
 
     public List<StateData> getStateDataList() {
@@ -67,7 +68,6 @@ public class StateCodes implements Database.Batchable<StateCodes.StateData>, Dat
     {
         try
         {
-            List<StateData> stateDataList = (List<StateData>) Json.deserialize(stateCodes, List<StateData>.class);
             Id jobId = run(stateDataList);
             
             PageReference redirect = new PageReference('/apex/StateCodes');
@@ -99,7 +99,14 @@ public class StateCodes implements Database.Batchable<StateCodes.StateData>, Dat
     {
         if (isRunning()) throw new AsyncException('Batch already running');
         StateCodes batch = new StateCodes();
-        if (stateDataList != null) batch.stateDataList = stateDataList;
+        if (stateDataList != null) 
+        {
+            batch.stateDataList = stateDataList;
+        }
+        else 
+        {
+            batch.stateDataList = batch.getStateDataList(); 
+        }
         return Database.executeBatch(batch, 1);
     }
 
@@ -129,9 +136,7 @@ public class StateCodes implements Database.Batchable<StateCodes.StateData>, Dat
     }
 
     public void execute(Database.BatchableContext context, List<StateData> stateDataList)
-    {
-        List<Document> documents = new List<Document>();
-        
+    {     
         // Fetch all existing state names
         Set<String> existingStateNames = new Set<String>();
         for (StateData stateData : stateDataList) {
@@ -162,38 +167,18 @@ public class StateCodes implements Database.Batchable<StateCodes.StateData>, Dat
             }
             catch (HandledException e)
             {
-                try
-                {
-                    newStateCode(countryCode, stateCode, stateName, integrationValue);
-                }
-                catch (HandledException innerE)
-                {
-                    System.debug('HandledException in newStateCode: ' + innerE.getMessage());
-                    continue;
-                }
+                System.debug('HandledException: ' + e.getMessage());
                 continue;
             }
             catch (UnsupportedOperationException e)
             {
                 System.debug('UnsupportedOperationException: ' + e.getMessage());
-                documents.add(new Document(
-                    Name = stateData.stateCode + '.txt',
-                    FolderId = UserInfo.getUserId(),
-                    Body = Blob.valueOf(e.getMessage())
-                ));
             }
             catch (Exception e)
             {
                 System.debug('Unexpected Exception: ' + e.getMessage());
-                documents.add(new Document(
-                    Name = stateData.stateCode + '_unexpected_error.txt',
-                    FolderId = UserInfo.getUserId(),
-                    Body = Blob.valueOf(e.getMessage())
-                ));
             }
         }
-        
-        insert documents;
     }
 
     public void finish(Database.BatchableContext context)
@@ -255,72 +240,6 @@ public class StateCodes implements Database.Batchable<StateCodes.StateData>, Dat
         postRequest.setBody(postdata.getUrl().substringAfter('?'));
         postRequest.setEndpoint(orgUrl + '/i18n/ConfigureNewState.apexp');
         postRequest.setHeader('Cookie', 'sid=' + UserInfo.getSessionId());
-        postRequest.setHeader('Content-Type', 'application/x-www-form-urlencoded');
-        
-        if (Test.isRunningTest()) Test.setMock(HttpCalloutMock.class, this);
-        HttpResponse postResponse = sendTwice(postRequest);
-        
-        if (postResponse.getBody().contains('<h4>Errors</h4>'))
-        {
-            String message = postResponse.getBody().substringBetween('<li style="padding-top:5px">', '</li>').trim();
-            throw new HandledException(message);
-        }
-        
-        if (postResponse.getBody().contains('<h4>Error:</h4>'))
-        {
-            String message = postResponse.getBody().substringBetween('<h4>Error:</h4></span>', '<').trim();
-            throw new HandledException(message);
-        }
-        
-        if (postResponse.getBody().contains('You are missing information'))
-        {
-            String message = 'Country does not exist: ' + countryCode;
-            throw new HandledException(message);
-        }
-        
-        if (!postResponse.getBody().contains('success=true'))
-        {
-            String message = 'Cannot find success redirect: ' + postResponse.getBody();
-            throw new UnsupportedOperationException(message);
-        }
-    }
-
-    public void newStateCode(String countryCode, String stateCode, String stateName, String integrationValue)
-    {
-        String orgUrl = Url.getOrgDomainUrl().toExternalForm();
-        
-        HttpRequest getRequest = new HttpRequest();
-        getRequest.setMethod('GET');
-        getRequest.setEndpoint(orgUrl + '/i18n/ConfigureNewState.apexp?countryIso=' + countryCode);
-        getRequest.setHeader('Cookie', 'sid=' + UserInfo.getSessionId());
-        
-        if (Test.isRunningTest()) Test.setMock(HttpCalloutMock.class, this);
-        HttpResponse getResponse = sendTwice(getRequest);
-        
-        String viewState = getResponse.getBody().substringBetween('com.salesforce.visualforce.ViewState" value="', '"');
-        String viewStateMac = getResponse.getBody().substringBetween('com.salesforce.visualforce.ViewStateMAC" value="', '"');
-        String viewStateCsrf = getResponse.getBody().substringBetween('com.salesforce.visualforce.ViewStateCSRF" value="', '"');
-        String viewStateVersion = getResponse.getBody().substringBetween('com.salesforce.visualforce.ViewStateVersion" value="', '"');
-        
-        PageReference postdata = new PageReference('');
-        Map<String,String> parameters = postdata.getParameters();
-        
-        parameters.put('configurenew:j_id1', 'configurenew:j_id1');
-        parameters.put('configurenew:j_id1:blockNew:j_id43:addButton', 'Add');
-        parameters.put('configurenew:j_id1:blockNew:j_id9:nameSectionItem:editName', stateName);
-        parameters.put('configurenew:j_id1:blockNew:j_id9:codeSectionItem:editIsoCode', stateCode);
-        parameters.put('configurenew:j_id1:blockNew:j_id9:intValSectionItem:editIntVal', integrationValue);
-        
-        parameters.put('com.salesforce.visualforce.ViewState', viewState);
-        parameters.put('com.salesforce.visualforce.ViewStateVersion', viewStateVersion);
-        parameters.put('com.salesforce.visualforce.ViewStateMAC', viewStateMac);
-        parameters.put('com.salesforce.visualforce.ViewStateCSRF', viewStateCsrf);
-        
-        HttpRequest postRequest = new HttpRequest();
-        postRequest.setMethod('POST');
-        postRequest.setBody(postdata.getUrl().substringAfter('?'));
-        postRequest.setEndpoint(orgUrl + '/i18n/ConfigureNewState.apexp');
-        postRequest.setHeader('Cookie', 'sid=' + UserInfo.getUserId());
         postRequest.setHeader('Content-Type', 'application/x-www-form-urlencoded');
         
         if (Test.isRunningTest()) Test.setMock(HttpCalloutMock.class, this);
